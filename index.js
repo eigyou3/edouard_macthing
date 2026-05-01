@@ -1,3 +1,5 @@
+const http = require('http');
+
 const {
   Client, GatewayIntentBits, EmbedBuilder,
   REST, Routes, SlashCommandBuilder,
@@ -417,7 +419,9 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    const { teams, remainderMembers } = makeTeams(data.participants, data.sortMethod);
+    const http = require('http');
+
+const { teams, remainderMembers } = makeTeams(data.participants, data.sortMethod);
 
     // Embed作成
     let description = '';
@@ -443,6 +447,15 @@ client.on('interactionCreate', async (interaction) => {
     await interaction.reply({ embeds: [resultEmbed] });
     return;
   }
+});
+
+// ダミーHTTPサーバー（Render無料枠用）
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end('OK');
+}).listen(PORT, () => {
+  console.log(`✅ HTTPサーバー起動: port ${PORT}`);
 });
 
 client.login(process.env.DISCORD_TOKEN);
