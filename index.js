@@ -11,7 +11,7 @@ const {
 // 権限ユーザー
 // ==============================
 const ALLOWED_USERS = [
-  '1088369918069715024',
+  '1088369918069715024','936419559165026304'
 ];
 
 // matchingData: messageId -> { sortMethod, sortLabel, participants, authorId, authorTag, authorAvatar }
