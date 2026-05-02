@@ -239,9 +239,9 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.reply({ content: '❌ 権限がありません。', ephemeral: true }); return;
     }
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('sort_power_equal').setLabel('戦力が同じくらいにする').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('sort_total_equal').setLabel('全チームの総戦力を揃える').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('sort_job_spread').setLabel('職業をバラける').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sort_avg_equal').setLabel('チーム内の平均戦力を揃える').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sort_random').setLabel('完全ランダム').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('sort_confirm').setLabel('集計する').setStyle(ButtonStyle.Danger),
     );
     await interaction.reply({
