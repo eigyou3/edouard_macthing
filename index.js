@@ -16,6 +16,8 @@ const ALLOWED_USERS = [
 
 // matchingData: messageId -> { sortMethod, sortLabel, participants, authorId, authorTag, authorAvatar }
 const matchingData = new Map();
+// channelMap: channelId -> messageId（チャンネルごとの最新アナウンスID）
+const channelMap = new Map();
 
 // ==============================
 // 戦力パース
@@ -65,10 +67,24 @@ const SORT_LABELS = {
 };
 
 // ==============================
-// Embedを最終行に再投稿
+// Embedを編集のみで更新
+// ==============================
+async function updateEmbed(channel, messageId, data) {
+  try {
+    const msg = await channel.messages.fetch(messageId);
+    await msg.edit({
+      embeds: [buildAnnounceEmbed(data)],
+      components: [buildActionRow()],
+    });
+  } catch (e) {
+    console.warn('Embed編集失敗:', e.message);
+  }
+}
+
+// ==============================
+// Embedを削除して最終行に再投稿
 // ==============================
 async function repostEmbed(channel, oldMessageId, data) {
-  // 古いメッセージを削除
   try {
     const old = await channel.messages.fetch(oldMessageId);
     await old.delete();
@@ -79,10 +95,52 @@ async function repostEmbed(channel, oldMessageId, data) {
     components: [buildActionRow()],
   });
 
-  // dataをIDで再登録
   matchingData.delete(oldMessageId);
   matchingData.set(posted.id, data);
+  channelMap.set(channel.id, posted.id);
   return posted;
+}
+
+// ==============================
+// 職業かぶり解消（スワップ）
+// ==============================
+function resolveJobConflicts(teams) {
+  let improved = true;
+  let iter = 0;
+  while (improved && iter < 200) {
+    improved = false;
+    iter++;
+    for (let a = 0; a < teams.length; a++) {
+      // チームa内の職業かぶりを探す
+      const jobCount = {};
+      for (const p of teams[a]) jobCount[p.job] = (jobCount[p.job] || 0) + 1;
+      for (const job of Object.keys(jobCount)) {
+        if (jobCount[job] < 2) continue;
+        // 被っている職業の人を他チームと交換
+        for (let b = 0; b < teams.length; b++) {
+          if (a === b) continue;
+          for (let ai = 0; ai < teams[a].length; ai++) {
+            if (teams[a][ai].job !== job) continue;
+            for (let bi = 0; bi < teams[b].length; bi++) {
+              if (teams[b][bi].job === job) continue; // 同じ職業なら意味なし
+              // チームbにこの職業が既にないか確認
+              const bJobs = teams[b].map(p => p.job);
+              if (bJobs.includes(job)) continue;
+              // スワップ
+              [teams[a][ai], teams[b][bi]] = [teams[b][bi], teams[a][ai]];
+              improved = true;
+              break;
+            }
+            if (improved) break;
+          }
+          if (improved) break;
+        }
+        if (improved) break;
+      }
+      if (improved) break;
+    }
+  }
+  return teams;
 }
 
 // ==============================
@@ -164,6 +222,9 @@ function makeTeams(participants, sortMethod) {
       const teamIdx = round % 2 === 0 ? pos : teamCount - 1 - pos;
       teams[teamIdx].push(main[i]);
     }
+
+    // 職業かぶり解消
+    teams = resolveJobConflicts(teams);
 
     // 同じ職業同士でスワップして総戦力を均等化
     let improved = true;
@@ -267,6 +328,7 @@ client.on('interactionCreate', async (interaction) => {
       };
       const posted = await interaction.channel.send({ embeds: [buildAnnounceEmbed(data)], components: [buildActionRow()] });
       matchingData.set(posted.id, data);
+      channelMap.set(interaction.channelId, posted.id);
       await interaction.update({ content: '✅ アナウンスを投稿しました！', components: [] });
       return;
     }
@@ -316,9 +378,8 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     data.participants.push({ name, job, power });
-    await interaction.deferReply({ ephemeral: true });
-    const posted = await repostEmbed(interaction.channel, messageId, data);
-    await interaction.editReply({ content: `✅ 登録完了！${name}（${job}・${formatPower(power)}）\n現在：**${data.participants.length}人**` });
+    await updateEmbed(interaction.channel, messageId, data);
+    await interaction.deferUpdate().catch(() => {});
     return;
   }
 
@@ -356,23 +417,20 @@ client.on('interactionCreate', async (interaction) => {
     const idx = parseInt(interaction.values[0]);
     const removed = data.participants.splice(idx, 1)[0];
 
-    // 再投稿
-    await interaction.deferUpdate();
-    const posted = await repostEmbed(interaction.channel, messageId, data);
+    await updateEmbed(interaction.channel, messageId, data);
 
-    // セレクトメニューを更新（まだ参加者がいれば続けて選択可能）
     if (data.participants.length > 0) {
       const options = data.participants.slice(0, 25).map((p, i) => ({
         label: `${p.name}（${p.job}・${formatPower(p.power)}）`, value: `${i}`,
       }));
-      await interaction.editReply({
-        content: `✅ **${removed.name}** を削除しました。続けて選択できます（現在：${data.participants.length}人）`,
+      await interaction.update({
+        content: `削除する参加者を選択（続けて選択できます）：`,
         components: [new ActionRowBuilder().addComponents(
-          new StringSelectMenuBuilder().setCustomId(`remove_select:${posted.id}`).setPlaceholder('参加者を選択').addOptions(options)
+          new StringSelectMenuBuilder().setCustomId(`remove_select:${messageId}`).setPlaceholder('参加者を選択').addOptions(options)
         )],
       });
     } else {
-      await interaction.editReply({ content: `✅ **${removed.name}** を削除しました。参加者が0人になりました。`, components: [] });
+      await interaction.update({ content: '参加者が0人になりました。', components: [] });
     }
     return;
   }
@@ -434,18 +492,17 @@ client.on('interactionCreate', async (interaction) => {
     const oldPower = p.power;
     p.power = newPower;
 
-    await interaction.deferReply({ ephemeral: true });
-    const posted = await repostEmbed(interaction.channel, messageId, data);
+    await updateEmbed(interaction.channel, messageId, data);
 
-    // 続けて変更できるようにセレクトを再表示
     const options = data.participants.slice(0, 25).map((p2, i) => ({
       label: `${p2.name}（${p2.job}・${formatPower(p2.power)}）`, value: `${i}`,
     }));
-    await interaction.editReply({
-      content: `✅ **${p.name}** の戦力を ${formatPower(oldPower)} → ${formatPower(newPower)} に変更しました。\n続けて変更できます：`,
+    await interaction.reply({
+      content: `続けて変更できます：`,
       components: [new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder().setCustomId(`edit_select:${posted.id}`).setPlaceholder('参加者を選択').addOptions(options)
+        new StringSelectMenuBuilder().setCustomId(`edit_select:${messageId}`).setPlaceholder('参加者を選択').addOptions(options)
       )],
+      ephemeral: true,
     });
     return;
   }
@@ -484,9 +541,8 @@ client.on('interactionCreate', async (interaction) => {
     data.sortMethod = method;
     data.sortLabel = SORT_LABELS[method];
 
-    await interaction.deferUpdate();
-    const posted = await repostEmbed(interaction.channel, messageId, data);
-    await interaction.editReply({ content: `✅ 集計方法を **${SORT_LABELS[method]}** に変更しました！`, components: [] });
+    await updateEmbed(interaction.channel, messageId, data);
+    await interaction.update({ content: `✅ 集計方法を **${SORT_LABELS[method]}** に変更しました！`, components: [] });
     return;
   }
 
@@ -501,14 +557,15 @@ client.on('interactionCreate', async (interaction) => {
 
     const { teams, remainderMembers } = makeTeams(data.participants, data.sortMethod);
 
-    let description = '';
+    let description = `集計方法：**${data.sortLabel}**\n\n`;
     teams.forEach((team, i) => {
-      const members = team.map(p => `${p.name}―${p.job}―${formatPower(p.power)}`).join('┃');
       const total = team.reduce((s, p) => s + p.power, 0);
+      const members = team.map(p => `${p.name}┃${formatPower(p.power)}┃${p.job}`).join('\n');
       description += `**チーム${i + 1}**（総戦力：${formatPower(total)}）\n${members}\n\n`;
     });
     if (remainderMembers.length > 0) {
-      description += `**⚠️ 余り（人数が足りません）**\n${remainderMembers.map(p => `${p.name}―${p.job}―${formatPower(p.power)}`).join('┃')}`;
+      const members = remainderMembers.map(p => `${p.name}┃${formatPower(p.power)}┃${p.job}`).join('\n');
+      description += `**⚠️ 余り（人数が足りません）**\n${members}`;
     }
 
     await interaction.reply({
@@ -516,6 +573,18 @@ client.on('interactionCreate', async (interaction) => {
     });
     return;
   }
+});
+
+// ==============================
+// 他人の投稿時にアナウンスを最終行へ再投稿
+// ==============================
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+  const messageId = channelMap.get(message.channelId);
+  if (!messageId) return;
+  const data = matchingData.get(messageId);
+  if (!data) return;
+  await repostEmbed(message.channel, messageId, data);
 });
 
 // ダミーHTTPサーバー
