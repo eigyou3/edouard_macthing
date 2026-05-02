@@ -61,9 +61,9 @@ function buildActionRow() {
 }
 
 const SORT_LABELS = {
-  total_equal: '総戦力を揃える',
-  avg_equal: 'チーム内平均戦力を揃える',
-  random: 'ランダム',
+  total_equal: '全チームの総戦力を揃える',
+  avg_equal: 'チーム内の平均戦力を揃える',
+  random: '完全ランダム',
 };
 
 // ==============================
@@ -240,7 +240,7 @@ client.on('interactionCreate', async (interaction) => {
     }
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('sort_power_equal').setLabel('戦力が同じくらいにする').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('sort_total_equal').setLabel('総戦力を揃える').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sort_total_equal').setLabel('全チームの総戦力を揃える').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('sort_job_spread').setLabel('職業をバラける').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('sort_confirm').setLabel('集計する').setStyle(ButtonStyle.Danger),
     );
@@ -289,9 +289,9 @@ client.on('interactionCreate', async (interaction) => {
       if (key.startsWith('setup_') && val.authorId === interaction.user.id) { val.sortMethod = method; break; }
     }
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('sort_total_equal').setLabel('総戦力を揃える').setStyle(method === 'total_equal' ? ButtonStyle.Primary : ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('sort_avg_equal').setLabel('チーム内平均戦力を揃える').setStyle(method === 'avg_equal' ? ButtonStyle.Primary : ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('sort_random').setLabel('ランダム').setStyle(method === 'random' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sort_total_equal').setLabel('全チームの総戦力を揃える').setStyle(method === 'total_equal' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sort_avg_equal').setLabel('チーム内の平均戦力を揃える').setStyle(method === 'avg_equal' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sort_random').setLabel('完全ランダム').setStyle(method === 'random' ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('sort_confirm').setLabel('集計する').setStyle(ButtonStyle.Danger),
     );
     await interaction.update({
@@ -467,9 +467,9 @@ client.on('interactionCreate', async (interaction) => {
     if (!data) { await interaction.reply({ content: '❌ 無効です。', ephemeral: true }); return; }
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`chs_total_equal:${interaction.message.id}`).setLabel('総戦力を揃える').setStyle(data.sortMethod === 'total_equal' ? ButtonStyle.Primary : ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`chs_avg_equal:${interaction.message.id}`).setLabel('チーム内平均戦力を揃える').setStyle(data.sortMethod === 'avg_equal' ? ButtonStyle.Primary : ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`chs_random:${interaction.message.id}`).setLabel('ランダム').setStyle(data.sortMethod === 'random' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`chs_total_equal:${interaction.message.id}`).setLabel('全チームの総戦力を揃える').setStyle(data.sortMethod === 'total_equal' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`chs_avg_equal:${interaction.message.id}`).setLabel('チーム内の平均戦力を揃える').setStyle(data.sortMethod === 'avg_equal' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`chs_random:${interaction.message.id}`).setLabel('完全ランダム').setStyle(data.sortMethod === 'random' ? ButtonStyle.Primary : ButtonStyle.Secondary),
     );
     await interaction.reply({
       content: `現在の集計方法：**${data.sortLabel}**\n変更先を選んでください：`,
