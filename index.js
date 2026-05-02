@@ -61,9 +61,9 @@ function buildActionRow() {
 }
 
 const SORT_LABELS = {
-  power_equal: '戦力が同じくらいにする',
   total_equal: '総戦力を揃える',
-  job_spread: '職業をバラける',
+  avg_equal: 'チーム内平均戦力を揃える',
+  random: 'ランダム',
 };
 
 // ==============================
@@ -102,148 +102,89 @@ async function repostEmbed(channel, oldMessageId, data) {
 }
 
 // ==============================
-// 職業かぶり解消（スワップ）
+// ユーティリティ
 // ==============================
-function resolveJobConflicts(teams) {
-  let improved = true;
-  let iter = 0;
-  while (improved && iter < 200) {
-    improved = false;
-    iter++;
-    for (let a = 0; a < teams.length; a++) {
-      // チームa内の職業かぶりを探す
-      const jobCount = {};
-      for (const p of teams[a]) jobCount[p.job] = (jobCount[p.job] || 0) + 1;
-      for (const job of Object.keys(jobCount)) {
-        if (jobCount[job] < 2) continue;
-        // 被っている職業の人を他チームと交換
-        for (let b = 0; b < teams.length; b++) {
-          if (a === b) continue;
-          for (let ai = 0; ai < teams[a].length; ai++) {
-            if (teams[a][ai].job !== job) continue;
-            for (let bi = 0; bi < teams[b].length; bi++) {
-              if (teams[b][bi].job === job) continue; // 同じ職業なら意味なし
-              // チームbにこの職業が既にないか確認
-              const bJobs = teams[b].map(p => p.job);
-              if (bJobs.includes(job)) continue;
-              // スワップ
-              [teams[a][ai], teams[b][bi]] = [teams[b][bi], teams[a][ai]];
-              improved = true;
-              break;
-            }
-            if (improved) break;
-          }
-          if (improved) break;
-        }
-        if (improved) break;
-      }
-      if (improved) break;
-    }
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
   }
-  return teams;
+  return a;
 }
 
 // ==============================
-// チーム分けアルゴリズム（改善版）
+// チーム分けアルゴリズム（新版）
+// 基本方針：まず騎士と賢者を各チームに振り分け、残りを割り当て
 // ==============================
 function makeTeams(participants, sortMethod) {
   const TEAM_SIZE = 4;
-  const JOBS = ['闘士', '騎士', '賢者', 'ソーサラー'];
   const teamCount = Math.floor(participants.length / TEAM_SIZE);
   const remainderMembers = [];
 
   if (teamCount === 0) return { teams: [], remainderMembers: [...participants] };
 
-  // 職業ごとにグループ化して強い順にソート
-  const byJob = {};
-  for (const j of JOBS) byJob[j] = [];
-  const unknown = [];
-  for (const p of participants) {
-    if (byJob[p.job]) byJob[p.job].push({ ...p });
-    else unknown.push({ ...p });
-  }
-  for (const j of JOBS) byJob[j].sort((a, b) => b.power - a.power);
-
   const teams = Array.from({ length: teamCount }, () => []);
 
-  if (sortMethod === 'job_spread') {
-    // 職業バラけ最優先：職業ごとにスネーク配置
-    for (const j of JOBS) {
-      const group = byJob[j];
-      for (let i = 0; i < group.length; i++) {
-        if (i < teamCount) {
-          // スネーク配置
-          const round = Math.floor(i / teamCount);
-          const pos = i % teamCount;
-          const teamIdx = round % 2 === 0 ? pos : teamCount - 1 - pos;
-          teams[teamIdx].push(group[i]);
-        } else {
-          remainderMembers.push(group[i]);
-        }
-      }
+  if (sortMethod === 'random') {
+    // 完全ランダム
+    const shuffled = shuffle(participants);
+    for (let i = 0; i < shuffled.length; i++) {
+      if (i < teamCount * TEAM_SIZE) teams[i % teamCount].push(shuffled[i]);
+      else remainderMembers.push(shuffled[i]);
     }
-    for (const p of unknown) {
-      const minTeam = teams.reduce((m, t, i) => t.length < teams[m].length ? i : m, 0);
-      if (teams[minTeam].length < TEAM_SIZE) teams[minTeam].push(p);
-      else remainderMembers.push(p);
-    }
+    return { teams, remainderMembers };
+  }
 
-  } else if (sortMethod === 'power_equal') {
-    // 戦力が同じくらい：全体を強い順に並べて、職業かぶりを考慮しながらスネーク配置
-    const sorted = [...participants].sort((a, b) => b.power - a.power);
-    const main = sorted.slice(0, teamCount * TEAM_SIZE);
-    const rem = sorted.slice(teamCount * TEAM_SIZE);
+  // 騎士・賢者を戦力順に並べて各チームに振り分け
+  const knights = [...participants].filter(p => p.job === '騎士').sort((a, b) => b.power - a.power);
+  const sages = [...participants].filter(p => p.job === '賢者').sort((a, b) => b.power - a.power);
+  const others = [...participants].filter(p => p.job !== '騎士' && p.job !== '賢者').sort((a, b) => b.power - a.power);
 
-    // スネーク配置
-    for (let i = 0; i < main.length; i++) {
-      const round = Math.floor(i / teamCount);
-      const pos = i % teamCount;
-      const teamIdx = round % 2 === 0 ? pos : teamCount - 1 - pos;
-      teams[teamIdx].push(main[i]);
-    }
-    remainderMembers.push(...rem);
+  // 騎士をスネーク配置
+  for (let i = 0; i < knights.length; i++) {
+    if (teams.every(t => t.length >= TEAM_SIZE)) { remainderMembers.push(knights[i]); continue; }
+    const round = Math.floor(i / teamCount);
+    const pos = i % teamCount;
+    const idx = round % 2 === 0 ? pos : teamCount - 1 - pos;
+    const target = teams[idx].length < TEAM_SIZE ? idx : teams.findIndex(t => t.length < TEAM_SIZE);
+    if (target >= 0) teams[target].push(knights[i]);
+    else remainderMembers.push(knights[i]);
+  }
 
-  } else if (sortMethod === 'total_equal') {
-    // 総戦力を揃える：同じ職業同士で強さ順に入れ替えながら均等化
-    // まず職業ごとにスネーク配置
-    const allSorted = [...participants].sort((a, b) => b.power - a.power);
-    const main = allSorted.slice(0, teamCount * TEAM_SIZE);
-    const rem = allSorted.slice(teamCount * TEAM_SIZE);
+  // 賢者をスネーク配置
+  for (let i = 0; i < sages.length; i++) {
+    if (teams.every(t => t.length >= TEAM_SIZE)) { remainderMembers.push(sages[i]); continue; }
+    const round = Math.floor(i / teamCount);
+    const pos = i % teamCount;
+    const idx = round % 2 === 0 ? pos : teamCount - 1 - pos;
+    const target = teams[idx].length < TEAM_SIZE ? idx : teams.findIndex(t => t.length < TEAM_SIZE);
+    if (target >= 0) teams[target].push(sages[i]);
+    else remainderMembers.push(sages[i]);
+  }
 
-    // スネーク配置（職業優先）
-    for (const j of JOBS) {
-      const group = byJob[j].filter(p => main.includes(p) || main.find(m => m.name === p.name));
+  if (sortMethod === 'total_equal') {
+    // 総戦力を揃える：残りを強い順にスネーク配置後、同職業スワップで均等化
+    for (let i = 0; i < others.length; i++) {
+      if (teams.every(t => t.length >= TEAM_SIZE)) { remainderMembers.push(others[i]); continue; }
+      const minTeam = teams.reduce((m, t, i2) => t.length < teams[m].length ? i2 : m, 0);
+      teams[minTeam].push(others[i]);
     }
 
-    // シンプルなスネーク配置後に総戦力均等化
-    for (let i = 0; i < main.length; i++) {
-      const round = Math.floor(i / teamCount);
-      const pos = i % teamCount;
-      const teamIdx = round % 2 === 0 ? pos : teamCount - 1 - pos;
-      teams[teamIdx].push(main[i]);
-    }
-
-    // 職業かぶり解消
-    teams = resolveJobConflicts(teams);
-
-    // 同じ職業同士でスワップして総戦力を均等化
-    let improved = true;
-    let iter = 0;
-    while (improved && iter < 100) {
-      improved = false;
-      iter++;
+    // 同職業スワップで総戦力均等化
+    let improved = true, iter = 0;
+    while (improved && iter < 200) {
+      improved = false; iter++;
       for (let a = 0; a < teams.length; a++) {
         for (let b = a + 1; b < teams.length; b++) {
+          const totalA = teams[a].reduce((s, p) => s + p.power, 0);
+          const totalB = teams[b].reduce((s, p) => s + p.power, 0);
           for (let ai = 0; ai < teams[a].length; ai++) {
             for (let bi = 0; bi < teams[b].length; bi++) {
               if (teams[a][ai].job !== teams[b][bi].job) continue;
-              const totalA = teams[a].reduce((s, p) => s + p.power, 0);
-              const totalB = teams[b].reduce((s, p) => s + p.power, 0);
-              const diff = Math.abs(totalA - totalB);
-              // スワップ後の差
               const newA = totalA - teams[a][ai].power + teams[b][bi].power;
               const newB = totalB - teams[b][bi].power + teams[a][ai].power;
-              if (Math.abs(newA - newB) < diff) {
+              if (Math.abs(newA - newB) < Math.abs(totalA - totalB)) {
                 [teams[a][ai], teams[b][bi]] = [teams[b][bi], teams[a][ai]];
                 improved = true;
               }
@@ -253,7 +194,17 @@ function makeTeams(participants, sortMethod) {
       }
     }
 
-    remainderMembers.push(...rem);
+  } else if (sortMethod === 'avg_equal') {
+    // チーム内平均戦力を揃える：残りを強い→弱い順に交互に割り当て
+    for (let i = 0; i < others.length; i++) {
+      if (teams.every(t => t.length >= TEAM_SIZE)) { remainderMembers.push(others[i]); continue; }
+      // 平均戦力が最も低いチームに追加
+      const target = teams
+        .map((t, i2) => ({ i: i2, avg: t.length ? t.reduce((s, p) => s + p.power, 0) / t.length : 0, len: t.length }))
+        .filter(t => t.len < TEAM_SIZE)
+        .sort((a, b) => a.avg - b.avg)[0].i;
+      teams[target].push(others[i]);
+    }
   }
 
   return { teams, remainderMembers };
@@ -329,7 +280,7 @@ client.on('interactionCreate', async (interaction) => {
       const posted = await interaction.channel.send({ embeds: [buildAnnounceEmbed(data)], components: [buildActionRow()] });
       matchingData.set(posted.id, data);
       channelMap.set(interaction.channelId, posted.id);
-      await interaction.update({ content: '✅ アナウンスを投稿しました！', components: [] });
+      await interaction.update({ content: '​', components: [] });
       return;
     }
 
@@ -338,9 +289,9 @@ client.on('interactionCreate', async (interaction) => {
       if (key.startsWith('setup_') && val.authorId === interaction.user.id) { val.sortMethod = method; break; }
     }
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('sort_power_equal').setLabel('戦力が同じくらいにする').setStyle(method === 'power_equal' ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('sort_total_equal').setLabel('総戦力を揃える').setStyle(method === 'total_equal' ? ButtonStyle.Primary : ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('sort_job_spread').setLabel('職業をバラける').setStyle(method === 'job_spread' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sort_avg_equal').setLabel('チーム内平均戦力を揃える').setStyle(method === 'avg_equal' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sort_random').setLabel('ランダム').setStyle(method === 'random' ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('sort_confirm').setLabel('集計する').setStyle(ButtonStyle.Danger),
     );
     await interaction.update({
@@ -355,8 +306,8 @@ client.on('interactionCreate', async (interaction) => {
     const modal = new ModalBuilder().setCustomId(`join_modal:${interaction.message.id}`).setTitle('参加登録');
     modal.addComponents(
       new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('join_name').setLabel('名前').setStyle(TextInputStyle.Short).setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('join_job').setLabel('職業（闘士 / 騎士 / 賢者 / ソーサラー）').setStyle(TextInputStyle.Short).setRequired(true)),
       new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('join_power').setLabel('戦力（例: 16.7M または 16.7）').setStyle(TextInputStyle.Short).setRequired(true)),
+      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('join_job').setLabel('職業（闘士 / 騎士 / 賢者 / ソーサラー）').setStyle(TextInputStyle.Short).setRequired(true)),
     );
     await interaction.showModal(modal);
     return;
@@ -516,9 +467,9 @@ client.on('interactionCreate', async (interaction) => {
     if (!data) { await interaction.reply({ content: '❌ 無効です。', ephemeral: true }); return; }
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`chs_power_equal:${interaction.message.id}`).setLabel('戦力が同じくらいにする').setStyle(data.sortMethod === 'power_equal' ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`chs_total_equal:${interaction.message.id}`).setLabel('総戦力を揃える').setStyle(data.sortMethod === 'total_equal' ? ButtonStyle.Primary : ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`chs_job_spread:${interaction.message.id}`).setLabel('職業をバラける').setStyle(data.sortMethod === 'job_spread' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`chs_avg_equal:${interaction.message.id}`).setLabel('チーム内平均戦力を揃える').setStyle(data.sortMethod === 'avg_equal' ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`chs_random:${interaction.message.id}`).setLabel('ランダム').setStyle(data.sortMethod === 'random' ? ButtonStyle.Primary : ButtonStyle.Secondary),
     );
     await interaction.reply({
       content: `現在の集計方法：**${data.sortLabel}**\n変更先を選んでください：`,
